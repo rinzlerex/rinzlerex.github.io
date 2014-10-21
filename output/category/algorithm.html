@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="cn">
+<head>
+        <meta charset="utf-8" />
+        <title>Forever Young - Algorithm</title>
+        <link rel="stylesheet" href="/theme/css/main.css" />
+
+        <!--[if IE]>
+            <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+        <![endif]-->
+</head>
+
+<body id="index" class="home">
+        <header id="banner" class="body">
+                <h1><a href="/">Forever Young </a></h1>
+                <nav><ul>
+                    <li class="active"><a href="/category/algorithm.html">Algorithm</a></li>
+                </ul></nav>
+        </header><!-- /#banner -->
+
+            <aside id="featured" class="body">
+                <article>
+                    <h1 class="entry-title"><a href="/paxosfen-bu-shi-yi-zhi-xing-suan-fa.html">Paxos分布式一致性算法</a></h1>
+<footer class="post-info">
+        <abbr class="published" title="2014-10-21T21:20:00">
+                Published: 周二 21 十月 2014
+        </abbr>
+
+        <address class="vcard author">
+                By                         <a class="url fn" href="/author/rex-shepherd.html">Rex Shepherd</a>
+        </address>
+<p>In <a href="/category/algorithm.html">Algorithm</a>. </p>
+
+</footer><!-- /.post-info --><h1><center>Paxos分布式系统一致性算法浅析 </center></h1>
+<h2>1、前言</h2>
+<p>本文主要内容包括Paxos一致性算法及其衍生算法的介绍。Paxos一致性算法是出了名的难理解（当然作者Leslie Lamport并不这么认为），甚至因此出现了一种衍生算法Raft，目的就是为了减小Paxos系列算法的理解难度。本文的目的就是希望尽可能从简的、图文并茂的介绍Paxos及其他常见Paxos衍生算法，从而读者能够更容易理解Paxos系列算法。</p>
+<h2>2、基本概念</h2>
+<p>Paxos是来解决分布式系统一致性问题的算法，是一种投票算法。在一个经典的Paxos系统中，集群节点可以分为以下几种角色：</p>
+<ul>
+<li>
+<p><strong>Coordinator</strong>（协调者，或Proposer，提议者）：向集群节点提出决策值建议，并根据节点的反馈来决定最终决策值。</p>
+</li>
+<li>
+<p><strong>Acceptor</strong>（接收者，投票者）：负责接收Coordinator提出的决策值建议，根据一定规则决定是否采纳决策值，并反馈给Coordinator。</p>
+</li>
+<li>
+<p><strong>Learner</strong>（学习者）：仅接受最终决策值，并为该请求产生应答，并不具有投票权力。</p>
+</li>
+</ul>
+<p>以及一些外部组件：</p>
+<ul>
+<li><strong>Client</strong>（客户端）：向Coordinator发送操作请求。</li>
+</ul>
+<p><center><img alt="A paxos system" src="http://i.imgur.com/4vECgvN.png" /></center></p>
+<p>&emsp;&emsp;任意一个集群节点可以同时扮演其中一个或者多个角色。从实际应用的角度来看，Coordinator和Learner负责与Paxos系统外部组件沟通，前者接收客户端发送的指令请求，并将其转发给集群;而后者则将作为投票结果的最终决策值提交给应用程序处理，由于Paxos算法保证的一致性，所以在实际应用中能够保证，对于每个集群节点，提交给应用的请求顺序完全一致，如果应用程序以状态机实现，那么执行序列的一致保证了应用内存状态的一致。</p>
+<h2>3、经典Paxos算法概述</h2>
+<p>一个基本的Paxos算法的投票过程可以大致分为两个步骤：</p>
+<h3>步骤一：Prepare</h3>
+<ul>
+<li>
+<p><strong>Coordinator</strong>：计算一个（递增的）提议编号i，并向所有Acceptor广播该提议请求，这个广播消息称作预备请求（prepare）。</p>
+</li>
+<li>
+<p><strong>Acceptor</strong>：接收到某个Coordinator的预备请求消息后，如果其中提议编号i大于它所保存的最近一次接收到的提议编号，则反馈给Coordinator一个消息，该消息（1）承诺不接受任何编号低于该请求编号n的请求消息，（2）包含该Acceptor最近一次采纳的最终决策值。否则，反馈一个拒绝预备的消息。</p>
+</li>
+</ul>
+<h3>步骤二——Accept</h3>
+<ul>
+<li>
+<p><strong>Coordinator</strong>：如果接收到“足够多”的预备请求响应，则选择一个最终决策值，以阶段一的提议编号向Acceptor广播采纳请求（accept）。其中，最终决策值要么是所有预备请求响应中包含的具有最大提议编号的最终决策值（如果有的话），要么是任意的由客户端传入的决策值（如果响应中不包含任何已被集群采纳的最终决策值）。另外，“足够多”是指响应数量达到法定人数（quorum），即集群中有效投票者的大多数。</p>
+</li>
+<li>
+<p><strong>Acceptor</strong>：接收到采纳请求后，如果期间未接收到任何编号大于n的提议请求，则采纳该决策值作为最终决策值，并向Learner广播已采纳消息。</p>
+</li>
+<li>
+<p><strong>Learner</strong>：接收已采纳消息，若接收数量大于法定人数，则更新本地采纳消息队列，通知上层应用处理产生应答。</p>
+</li>
+</ul>
+<h3>序列图</h3>
+<p>经典Paxos算法序列图如下：</p>
+<p><center><img alt="A paxos classic sequence" src="http://i.imgur.com/n48bRyF.png" /></center></p>
+<h3>分析</h3>
+<blockquote>
+<p>经典Paxos算法满足了两个分布式系统的基本特性：</p>
+<ul>
+<li><strong>Safty</strong></li>
+</ul>
+<p>又分非平凡性和一致性，非平凡性不必多说，一致性的保证是Paxos算法的根本，详细的理论证明超出本文讨论内容。</p>
+<ul>
+<li><strong>Progress</strong></li>
+</ul>
+<p>指若存在充足的非故障节点（主要是Acceptor），则算法一定能够收敛，亦即可用性和容错性。
+上述命题均有详细的数学证明，有兴趣请移步Leslie Lamport大牛的论文《Fast Paxos》，值得一提的是Leslie Lamport是著名的排版工具Latex的发明人（这个工具让本人受益匪浅），同时也是2014年图灵奖的获得者。稍微了解分布式系统的都知道著名的<strong><a href="http://en.wikipedia.org/wiki/CAP_theorem" title="CAP Theorem">CAP定理</a></strong>，即</p>
+<p><center><strong>对于一个分布式计算系统来说，不可能同时满足以下三点：   一致性（Consistency）、可用性(Availability)、分隔容错(Partition tolerence)</strong></center></p>
+<p>即使是大名鼎鼎的Paxos算法也不能幸免，但这似乎与Paxos满足的两个特性相矛盾，所以经典Paxos以及其他所有Paxos衍生的分布式一致性算法都必须克服这个问题，方法就是在Coordinators中选择其中一个作为Leader，当然选择Leader也是一个一致性问题，但是Paxos需要Leader只是为了满足Progress特性（即使Progress无法满足，Safety依然能够保证），实践中可以有很多在大多数时间内都有效的Leader选择方法，关于实践的问题会在后续文章里讨论。</p>
+</blockquote>
+<p>根据算法流程可以看出，经典Paxos算法每达成一次一致性需要4次额外的通信，如果对于每个客户端的请求都经过一次完整的经典Paxos过程，那收敛过程带来的额外开销是无法容忍的，因此，很多基于经典Paxos的衍生算法对此作了许多优化，下面章节将一一阐述。</p>
+<h2>4、Multi-Paxos算法概述</h2>
+<p>Multi-Paxos算法将经典Paxos算法收敛过程需要的通信次数从4次缩短为2次，适用于客户端指令以数据流方式连续输入、Coordinator节点相对稳定的情况。Multi-Paxos算法分为两个阶段。</p>
+<ul>
+<li><strong>起始阶段</strong></li>
+</ul>
+<p>开始阶段完全等效于经典Paxos算法，即Prepare、Accept两个步骤，开始阶段的典型场景如系统启动、Coordinator节点发生切换等。开始阶段完成一次收敛后进入稳定阶段。</p>
+<ul>
+<li><strong>稳定阶段</strong></li>
+</ul>
+<p>当Multi-Paxos系统处于稳定阶段时，对客户端的请求直接执行经典Paxos算法的Accept步骤，而不再执行Prepare步骤，从而减少了算法收敛需要的通信次数，从原来的4次减少为2次。</p>
+<h3>分析</h3>
+<blockquote>
+<p>如果节点可用性足够高的话，Multi-Paxos几乎全时处于稳定阶段，请求确认速度较经典Paxos提升一倍。实际情况也恰恰如此，单节点的可用性一般而言已经足够高，因此，Multi-Paxos算法是一种实际有效的Paxos衍生算法，但是后面要介绍的Fast-Paxos算法则在Multi-Paxos的基础上进一步优化。</p>
+</blockquote>
+<h2>5、Fast-Paxos算法</h2>
+<p>Fast-Paxos算法是在Multi-Paxos算法的基础上进一步优化，减少了请求从客户端到Learner需要的通信次数，从Multi-Paxos稳定阶段的3次通信（Client-Coordinator-Acceptor-Learner）减少为2次（Client-Acceptor-Learner），算法序列图如下所示。</p>
+<ul>
+<li><strong>无冲突情况下</strong></li>
+</ul>
+<p><center><img alt="Fast paxos without conflicts" src="http://i.imgur.com/KYGgcLl.png" /></center></p>
+<p>初始化时，Coordinator向所有Acceptor广播阶段序号，但不提交任何投票请求，相反，客户端直接向所有Acceptor广播请求（包括请求序号和请求内容），此时，Acceptor直接进入经典Paxos算法的步骤二，向Learner广播请求接收消息，Learner在收到足够多Acceptor的相同消息后处理请求、产生应答。在无冲突情况下，Coordinator不发挥作用。</p>
+<ul>
+<li><strong>有冲突情况下</strong></li>
+</ul>
+<p>可以看出，当客户端数量超过一个时，Acceptors接收不同客户端请求的顺序可能导致不一致，从而发生确认接收消息的冲突。此时Coordinator将最终确定一个请求序号，并将该请求作为集群最终的请求接收消息发出。冲突解决序列图如下。</p>
+<p><center><img alt="Fast paxos with conflicts" src="http://i.imgur.com/0fjxAJC.png" /></center></p>
+<h3>分析</h3>
+<blockquote>
+<p>Fast-Paxos在解决冲突时由Coordinator做出仲裁，最终确定一个接收序号（如上图即确定了序号i），但是并未指明与此冲突的另一个请求应当如何处理（即上图中的序号j和请求vj），在此给出两种解决方案：</p>
+<ol>
+<li>
+<p>一种简单的方案是，客户端如果超过一定时长未能收到响应，则重发请求。Learner可以通过请求编号来确认是否重复。</p>
+</li>
+<li>
+<p>另一种方案是将冲突的其他所有请求依次排队，然后逐个发出确认请求，这样可以保证所有客户端的请求不会丢失，但是Coordinator的实现复杂度有所增加。</p>
+</li>
+</ol>
+<p>Fast-Paxos在Multi-Paxos的基础上减少了请求从客户端到Learner的网络通信次数，但是，若存在多个客户端同时发送请求，则可能出现乱序冲突的情况，进而通过Coordinator的协调来最终裁定请求的顺序，对冲突仲裁的过程依然需要一次额外的网络通信，因此若冲突发生比较频繁时，Fast-Paxos的通信开销几乎等同于Multi-Paxos。</p>
+<p>所以，Fast-Paxos的性能取决于网络数据包乱序的发生频率，一定程度上取决于客户端的请求发送速率、网络容量等因素，但是最差的情况下（每次确认都发生冲突），其性能也与Multi-Paxos持平。在理想情况下，即网络消息无乱序的情况下，Fast-Paxos算法收敛延迟主要体现在Learner节点等待Quorum数量的确认消息，可见集群节点数量越多Quorum值也就越大，算法的收敛延迟的可能性就更高。</p>
+</blockquote>
+<p>如前所述，Paxos算法中的节点角色可以在同一个进程内实现，进而可以减少不必要的节点部署复杂度，即下一节将要介绍的Collapsed-Paxos。</p>
+<h3>关于Quorum</h3>
+<p>值得一提的是，在Fast-Paxos算法中，Quorum的选取不同于经典Paxos，本文只给出结论，证明超出讨论范围。
+假设N表示Acceptor的数量，F表示经典Paxos算法能正常收敛的最多故障Acceptor数量，E表示Fast-Paxos算法能正常收敛的最多故障Acceptor数，则对于经典Paxos算法，满足
+<center>Quorum=N-F，</center></p>
+<p>而对于Fast-Paxos算法，满足
+<center>Quorum=N-E，</center></p>
+<p>其中，N、E、F必须同时满足</p>
+<p><center>1. N&gt;2F，</center>
+<center>2. N&gt;2E+F</center></p>
+<p>根据上式可以得出</p>
+<p><center>E ≤ F，</center></p>
+<p>因此，可以得出结论：</p>
+<blockquote>
+<p>相同Acceptor节点数量的前提下，Fast-Paxos算法的可用性不高于经典Paxos算法。</p>
+</blockquote>
+<h2>6、Collapsed-Paxos</h2>
+<p>Collapsed-Paxos将多个Paxos集群角色集成到一个进程内。以经典Paxos为例，若将Coordinator、Acceptor和Learner集成在一个进程内，则可以称之为Collapsed Classic-Paxos，改进后序列图如下所示。</p>
+<h3>序列图</h3>
+<p><center><img alt="Collapsed paxos" src="http://i.imgur.com/6LeI4dH.png" /></center></p>
+<h3>分析</h3>
+<blockquote>
+<p>从序列图可以看出，Collapsed Paxos减少了Paxos集群需要的节点数量，一定程度降低了部署的复杂度，也使得算法的实现更加一致。然而，角色的集成并未带来性能的优化，Collapsed Classic-Paxos算法的收敛仍然需要4次额外的通信。</p>
+<p>因此，最常见的Paxos实现是将角色集成和算法优化进行统一，比如Collapsed Multi-Paxos或者Collapsed Fast-Paxos，这样既降低了部署、实现的复杂度，也提升了经典Paxos的性能。</p>
+<p>我认为，Collapsed Paxos的序列图更好地诠释了Paxos算法的精髓——Flat Everything，即所有节点平坦化。尽管有Leader和Follower之分，但是这不妨碍服务节点在物理上的、逻辑上的扁平化，只是服务节点在某些时段内可能处于不同的集群角色，而且这种差异相当微秒，角色的选举本身就是一次一致性的收敛过程，所以逻辑上还是扁平的。扁平化带来的好处不言而喻，集群的可用性随节点数量线性增加。</p>
+</blockquote>
+<h2>7、其他优化</h2>
+<p>前文所述都是在网络通信角度上的对Paxos做的优化，本章简单介绍几种其他方面的优化手段，比如优化网络带宽等。</p>
+<ul>
+<li>
+<p>主Learner——Acceptors将确认消息统一发往一个主Learner，再由主Learner转发给其他Learner，这样可以节约Acceptor到Learner的网络带宽，但是增加一次网络通信的延时。</p>
+</li>
+<li>
+<p>通信子集——Coordinator只向一个子集内的Acceptor发送Prepare、Accept等消息，这个子集数量应大于Quorum。但是这样似乎不能节约网络带宽，如非Coordinator以TCP方式发送消息。</p>
+</li>
+</ul>
+<h2>8、工程考虑</h2>
+<p>理想总是美好的，现实总是骨感的。要将Paxos用软件工程去实现，还有很多其他需要考虑的因素，本章内容将于《Paxos分布式系统一致性算法浅析（二）》阐明，先卖个关子:)。</p>                </article>
+<p class="paginator">
+    Page 1 / 1
+</p>
+            </aside><!-- /#featured -->
+        <section id="extras" class="body">
+                <div class="blogroll">
+                        <h2>blogroll</h2>
+                        <ul>
+                            <li><a href="http://getpelican.com/">Pelican</a></li>
+                            <li><a href="http://python.org/">Python.org</a></li>
+                            <li><a href="http://jinja.pocoo.org/">Jinja2</a></li>
+                            <li><a href="#">You can modify those links in your config file</a></li>
+                        </ul>
+                </div><!-- /.blogroll -->
+                <div class="social">
+                        <h2>social</h2>
+                        <ul>
+
+                            <li><a href="#">You can add links in your config file</a></li>
+                            <li><a href="#">Another social link</a></li>
+                        </ul>
+                </div><!-- /.social -->
+        </section><!-- /#extras -->
+
+        <footer id="contentinfo" class="body">
+                <address id="about" class="vcard body">
+                Proudly powered by <a href="http://getpelican.com/">Pelican</a>, which takes great advantage of <a href="http://python.org">Python</a>.
+                </address><!-- /#about -->
+
+                <p>The theme is by <a href="http://coding.smashingmagazine.com/2009/08/04/designing-a-html-5-layout-from-scratch/">Smashing Magazine</a>, thanks!</p>
+        </footer><!-- /#contentinfo -->
+
+</body>
+</html>
